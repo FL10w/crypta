@@ -274,8 +274,8 @@ TEST(Modes, CbcDoesNotProduceEqualBlocksForEqualPlainBlocks) {
     XorCipher cipher;
     const auto iv = Iv();
     const auto input = Bytes({
-        0x10, 0x20, 0x30, 0x40,
-        0x10, 0x20, 0x30, 0x40
+        0x10, 0x20, 0x30, 0x01,
+        0x10, 0x20, 0x30, 0x01
     });
 
     auto mode = crypto::MakeCipherModeStrategy(crypto::CipherMode::CBC, iv);
@@ -334,6 +334,7 @@ TEST(Modes, CfbParallelDecryptionMatchesIndependentBlockFormula) {
     const auto iv = Iv();
     // Fixed ciphertext avoids using the mode's encryption as the oracle.
     auto encrypted = std::vector(4096, std::byte{0x31});
+    encrypted.back() = std::byte{0x65}; // Expected plaintext ends in 0x01.
     std::vector<std::byte> expected(encrypted.size());
     for (std::size_t i = 0; i < encrypted.size(); ++i) {
         const auto previous = i < 4 ? iv[i] : encrypted[i - 4];

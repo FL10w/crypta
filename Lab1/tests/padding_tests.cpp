@@ -19,15 +19,15 @@ std::vector<std::byte> Bytes(std::initializer_list<unsigned int> values) {
 }
 
 TEST(Padding, AddsZerosPaddingToBlockBoundary) {
-    const auto input = Bytes({0xAA, 0xBB, 0xCC, 0xDD, 0xEE});
+    const auto input = Bytes({0xAA, 0xBB, 0xCC, 0xDD, 0x01});
 
     const auto result = crypto::AddPadding(input, 8, crypto::PaddingMode::Zeros);
 
-    EXPECT_EQ(result, Bytes({0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x00, 0x00, 0x00}));
+    EXPECT_EQ(result, Bytes({0xAA, 0xBB, 0xCC, 0xDD, 0x01, 0x00, 0x00, 0x00}));
 }
 
 TEST(Padding, DoesNotAddZerosPaddingWhenAlreadyAligned) {
-    const auto input = Bytes({0xAA, 0xBB, 0xCC, 0xDD});
+    const auto input = Bytes({0xAA, 0xBB, 0xCC, 0x01});
 
     const auto result = crypto::AddPadding(input, 4, crypto::PaddingMode::Zeros);
 
@@ -35,11 +35,11 @@ TEST(Padding, DoesNotAddZerosPaddingWhenAlreadyAligned) {
 }
 
 TEST(Padding, RemovesZerosPaddingFromEnd) {
-    const auto input = Bytes({0xAA, 0xBB, 0x00, 0x00});
+    const auto input = Bytes({0xAA, 0x01, 0x00, 0x00});
 
     const auto result = crypto::RemovePadding(input, 4, crypto::PaddingMode::Zeros);
 
-    EXPECT_EQ(result, Bytes({0xAA, 0xBB}));
+    EXPECT_EQ(result, Bytes({0xAA, 0x01}));
 }
 
 TEST(Padding, ThrowsOnZeroBlockSizeForZerosPadding) {

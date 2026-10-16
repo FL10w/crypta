@@ -111,14 +111,15 @@ namespace crypto {
             std::span<const std::byte> data,
             std::size_t block_size
         ) {
-            ValidateBlockSize(block_size, "zeros", false);
-            if (data.size() % block_size != 0) {
-                throw std::invalid_argument("data size for zeros padding is invalid");
-            }
+            ValidatePaddedData(data, block_size, "zeros", false);
 
             std::vector unpadded(data.begin(), data.end());
             while (!unpadded.empty() && unpadded.back() == std::byte{0}) {
                 unpadded.pop_back();
+            }
+
+            if (unpadded.empty()) {
+                unpadded.push_back(std::byte{0});
             }
 
             return unpadded;

@@ -6,42 +6,6 @@ import crypto.modes;
 import crypto.padding;
 
 namespace crypto {
-    namespace {
-        // Zeros padding has no length information. Frame the payload inside the
-        // encryption so that trailing payload zeros survive removing padding.
-        constexpr std::array zero_frame_tag{
-            std::byte{0x5A}, std::byte{0x50}, std::byte{0x30}, std::byte{0x31}
-        };
-
-        std::vector<std::byte> FrameZeros(std::span<const std::byte> input) {
-            std::vector result(input.begin(), input.end());
-            const auto size = static_cast<std::uint64_t>(input.size());
-            for (int shift = 56; shift >= 0; shift -= 8) {
-                result.push_back(static_cast<std::byte>((size >> shift) & 0xFF));
-            }
-            result.insert(result.end(), zero_frame_tag.begin(), zero_frame_tag.end());
-            return result;
-        }
-
-        std::vector<std::byte> UnframeZeros(std::vector<std::byte> input) {
-            constexpr std::size_t trailer_size = 8 + zero_frame_tag.size();
-            if (input.size() < trailer_size ||
-                !std::ranges::equal(std::span{input}.last(zero_frame_tag.size()), zero_frame_tag)) {
-                throw std::invalid_argument("invalid Zeros payload frame");
-            }
-            const auto payload_size = input.size() - trailer_size;
-            std::uint64_t expected_size = 0;
-            for (std::size_t i = 0; i < 8; ++i) {
-                expected_size = (expected_size << 8) | std::to_integer<std::uint64_t>(input[payload_size + i]);
-            }
-            if (expected_size != payload_size) {
-                throw std::invalid_argument("invalid Zeros payload length");
-            }
-            input.resize(payload_size);
-            return input;
-        }
-    }
-
     class SymmetricCipherContext::SymmetricCipherContextImpl {
     public:
         SymmetricCipherContextImpl(
@@ -72,15 +36,11 @@ namespace crypto {
 
         [[nodiscard]]
         std::vector<std::byte> Encrypt(std::span<const std::byte> input) const {
-            if (padding_mode_ == PaddingMode::Zeros) {
-                return cipher_mode_strategy_->Encrypt(*cipher_, FrameZeros(input), padding_mode_);
-            }
             return cipher_mode_strategy_->Encrypt(*cipher_, input, padding_mode_);
         }
         [[nodiscard]]
         std::vector<std::byte> Decrypt(std::span<const std::byte> input) const {
-            auto result = cipher_mode_strategy_->Decrypt(*cipher_, input, padding_mode_);
-            return padding_mode_ == PaddingMode::Zeros ? UnframeZeros(std::move(result)) : result;
+            return cipher_mode_strategy_->Decrypt(*cipher_, input, padding_mode_);
         }
     private:
         std::unique_ptr<SymmetricCipher> cipher_;
