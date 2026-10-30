@@ -29,14 +29,44 @@ namespace {
         return result;
     }
 
-    std::vector<std::byte> ReadFile(const std::filesystem::path& path) {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file || file.tellg() < 0) throw std::runtime_error("Cannot open " + path.string());
-        std::vector<std::byte> data(static_cast<std::size_t>(file.tellg()));
-        file.seekg(0);
-        if (!data.empty() && !file.read(reinterpret_cast<char*>(data.data()), data.size()))
-            throw std::runtime_error("Cannot read " + path.string());
-        return data;
+    struct FileInfo {
+        std::uintmax_t size = 0;
+        std::uintmax_t last_nonzero = 0;
+    };
+
+    FileInfo InspectFile(const std::filesystem::path& path) {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) throw std::runtime_error("Cannot open " + path.string());
+        std::array<char, 64 * 1024> buffer;
+        FileInfo info;
+        while (file.read(buffer.data(), buffer.size()) || file.gcount() != 0) {
+            const auto count = static_cast<std::size_t>(file.gcount());
+            for (std::size_t i = count; i > 0; --i) {
+                if (buffer[i - 1] != 0) {
+                    info.last_nonzero = info.size + i;
+                    break;
+                }
+            }
+            info.size += count;
+        }
+        if (!file.eof()) throw std::runtime_error("Cannot read " + path.string());
+        return info;
+    }
+
+    bool MatchesPrefix(const std::filesystem::path& original,
+        const std::filesystem::path& restored, std::uintmax_t expected_size) {
+        if (std::filesystem::file_size(restored) != expected_size) return false;
+        std::ifstream first(original, std::ios::binary), second(restored, std::ios::binary);
+        if (!first || !second) throw std::runtime_error("Cannot open files for comparison");
+        std::array<char, 64 * 1024> left, right;
+        while (expected_size != 0) {
+            const auto count = static_cast<std::streamsize>(std::min<std::uintmax_t>(expected_size, left.size()));
+            if (!first.read(left.data(), count) || !second.read(right.data(), count))
+                throw std::runtime_error("Cannot read files for comparison");
+            if (!std::equal(left.begin(), left.begin() + count, right.begin())) return false;
+            expected_size -= count;
+        }
+        return true;
     }
 
     void DemoAlgorithm(std::string_view name, std::size_t key_size,
@@ -76,16 +106,15 @@ namespace {
                     const auto stem = std::to_string(i) + "_" + input.filename().string();
                     const auto encrypted = directory / (stem + ".encrypted");
                     const auto restored = directory / (stem + ".restored");
-                    const auto original = ReadFile(input);
-                    if (padding == 0 && (original.empty() || original.back() == std::byte{0})) {
-                        // Zeros cannot distinguish original trailing zeros from padding.
+                    const auto original = InspectFile(input);
+                    if (padding == 0 && original.size == 0) {
                         // Discard stale outputs from older runs of this demonstration.
                         std::filesystem::remove(encrypted);
                         std::filesystem::remove(restored);
                         ++skipped;
                         std::cout << "[SKIP] " << name << ' ' << mode_names[mode] << " Zeros "
                             << input.filename().string()
-                            << ": exact roundtrip requires nonempty input ending in a nonzero byte"
+                            << ": empty input is not supported"
                             << std::endl;
                         continue;
                     }
@@ -94,7 +123,9 @@ namespace {
                     const auto encrypted_at = std::chrono::steady_clock::now();
                     context.DecryptAsync(encrypted, restored).get();
                     const auto restored_at = std::chrono::steady_clock::now();
-                    if (original != ReadFile(restored))
+                    const auto expected_size = padding == 0
+                        ? std::max<std::uintmax_t>(1, original.last_nonzero) : original.size;
+                    if (!MatchesPrefix(input, restored, expected_size))
                         throw std::runtime_error("File roundtrip mismatch: " + input.string());
                     ++total;
                     ++checked_files;
@@ -105,6 +136,10 @@ namespace {
                             << " encrypt=" << std::chrono::duration<double>(encrypted_at - start).count()
                             << "s decrypt=" << std::chrono::duration<double>(restored_at - encrypted_at).count()
                             << "s" << std::endl;
+                        if (expected_size != original.size) {
+                            std::cout << "[ZEROS] " << input.filename().string()
+                                << ": trailing zeros removed, restored " << expected_size << " byte(s)" << std::endl;
+                        }
                     }
                 }
                 std::cout << "[OK] " << name << ' ' << mode_names[mode] << ' '
@@ -154,7 +189,7 @@ int main(int argc, char** argv) {
             const auto relative = file.lexically_relative(output);
             if (relative.empty() || *relative.begin() != "..")
                 throw std::invalid_argument("Input files must be outside the output directory");
-            ReadFile(file);
+            InspectFile(file);
             std::cout << "Input: " << file.string() << '\n';
         }
         std::size_t total = 0, skipped = 0;

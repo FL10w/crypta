@@ -42,6 +42,13 @@ TEST(Padding, RemovesZerosPaddingFromEnd) {
     EXPECT_EQ(result, Bytes({0xAA, 0x01}));
 }
 
+TEST(Padding, KeepsOneByteWhenZerosPaddedDataContainsOnlyZeros) {
+    for (const auto size : {4, 8, 16}) {
+        const auto input = std::vector(size, std::byte{0});
+        EXPECT_EQ(crypto::RemovePadding(input, 4, crypto::PaddingMode::Zeros), Bytes({0}));
+    }
+}
+
 TEST(Padding, ThrowsOnZeroBlockSizeForZerosPadding) {
     const auto input = Bytes({0xAA});
 

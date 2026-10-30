@@ -65,6 +65,32 @@ std::vector<std::byte> GenerateLargeInput(std::size_t size) {
     return input;
 }
 
+struct TemporaryFiles {
+    std::filesystem::path directory = std::filesystem::temp_directory_path() /
+        ("crypta-chunks-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    TemporaryFiles() { std::filesystem::create_directory(directory); }
+    ~TemporaryFiles() {
+        std::error_code error;
+        std::filesystem::remove_all(directory, error);
+    }
+};
+
+void Write(const std::filesystem::path& path, std::span<const std::byte> bytes) {
+    std::ofstream file(path, std::ios::binary);
+    if (!bytes.empty()) file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    if (!file) throw std::runtime_error("test write failed");
+}
+
+std::vector<std::byte> Read(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file || file.tellg() < 0) throw std::runtime_error("test read failed");
+    std::vector<std::byte> bytes(static_cast<std::size_t>(file.tellg()));
+    file.seekg(0);
+    if (!bytes.empty() && !file.read(reinterpret_cast<char*>(bytes.data()), bytes.size()))
+        throw std::runtime_error("test read failed");
+    return bytes;
+}
+
 }
 
 TEST(Context, EncryptAsyncAndDecryptAsyncRoundTrip) {
@@ -154,4 +180,117 @@ TEST(Context, EncryptAsyncAndDecryptAsyncLargeInputRoundTrip) {
     context.DecryptAsync(encrypted, decrypted).get();
 
     EXPECT_EQ(decrypted, input);
+}
+
+TEST(Context, FileChunksMatchArrayOperationsForEveryModeAndPadding) {
+    TemporaryFiles temp;
+    const auto input_path = temp.directory / "input.bin";
+    const auto encrypted_path = temp.directory / "encrypted.bin";
+    const auto restored_path = temp.directory / "restored.bin";
+    const auto key = Bytes({1, 2, 3, 4});
+    const auto iv = Bytes({0xFF, 0xFF, 0xFF, 0xFD});
+    for (int mode = 0; mode < 7; ++mode) {
+        for (int padding = 0; padding < 4; ++padding) {
+            crypto::SymmetricCipherContext context(MakeCipher(), key,
+                static_cast<crypto::CipherMode>(mode), static_cast<crypto::PaddingMode>(padding),
+                mode == 0 ? std::span<const std::byte>{} : iv);
+            for (const auto size : {65535, 65536, 65537, 131077}) {
+                SCOPED_TRACE(::testing::Message() << "mode=" << mode << " padding=" << padding << " size=" << size);
+                auto input = GenerateLargeInput(size);
+                input[65534] = std::byte{0};
+                if (size > 65535) input[65535] = std::byte{0};
+                input.back() = std::byte{1};
+                Write(input_path, input);
+                std::vector<std::byte> array_ciphertext, restored;
+                context.EncryptAsync(input, array_ciphertext).get();
+                context.EncryptAsync(input_path, encrypted_path).get();
+                const auto file_ciphertext = Read(encrypted_path);
+                EXPECT_EQ(file_ciphertext.size(), array_ciphertext.size());
+                if (padding != static_cast<int>(crypto::PaddingMode::ISO10126))
+                    EXPECT_EQ(file_ciphertext, array_ciphertext);
+                context.DecryptAsync(file_ciphertext, restored).get();
+                EXPECT_EQ(restored, input);
+                context.DecryptAsync(encrypted_path, restored_path).get();
+                EXPECT_EQ(Read(restored_path), input);
+                // A file can also contain ciphertext produced by the array overload.
+                Write(encrypted_path, array_ciphertext);
+                context.DecryptAsync(encrypted_path, restored_path).get();
+                EXPECT_EQ(Read(restored_path), input);
+                EXPECT_EQ(Read(input_path), input);
+            }
+        }
+    }
+}
+
+TEST(Context, ZerosFilesKeepOneByteAndRemoveSuffixAcrossChunks) {
+    TemporaryFiles temp;
+    const auto input_path = temp.directory / "input.bin";
+    const auto encrypted_path = temp.directory / "encrypted.bin";
+    const auto restored_path = temp.directory / "restored.bin";
+    const auto key = Bytes({1, 2, 3, 4});
+    const auto iv = Bytes({0x10, 0x20, 0x30, 0x41});
+    for (int mode = 0; mode < 7; ++mode) {
+        crypto::SymmetricCipherContext context(MakeCipher(), key,
+            static_cast<crypto::CipherMode>(mode), crypto::PaddingMode::Zeros,
+            mode == 0 ? std::span<const std::byte>{} : iv);
+        for (const auto size : {1, 4, 65536, 65537, 196613}) {
+            for (const bool only_zeros : {true, false}) {
+                SCOPED_TRACE(::testing::Message() << "mode=" << mode << " size=" << size << " all_zero=" << only_zeros);
+                auto input = std::vector(size, std::byte{0});
+                if (!only_zeros) input.front() = std::byte{0x17};
+                Write(input_path, input);
+                context.EncryptFileAsync(input_path, encrypted_path).get();
+                context.DecryptFileAsync(encrypted_path, restored_path).get();
+                EXPECT_EQ(Read(restored_path), Bytes({only_zeros ? 0u : 0x17u}));
+                EXPECT_EQ(Read(input_path), input);
+            }
+        }
+    }
+}
+
+TEST(Context, RandomDeltaFileChunksPreserveExplicitDelta) {
+    TemporaryFiles temp;
+    auto input = GenerateLargeInput(131077);
+    const auto input_path = temp.directory / "input.bin";
+    const auto encrypted_path = temp.directory / "encrypted.bin";
+    const auto restored_path = temp.directory / "restored.bin";
+    Write(input_path, input);
+    crypto::SymmetricCipherContext context(MakeCipher(), Bytes({1, 2, 3, 4}),
+        crypto::CipherMode::RandomDelta, crypto::PaddingMode::PKCS7,
+        Bytes({0xFF, 0xFF, 0xFF, 0xFD}), {Bytes({0x12, 0x35})});
+    std::vector<std::byte> expected;
+    context.EncryptAsync(input, expected).get();
+    context.EncryptAsync(input_path, encrypted_path).get();
+    EXPECT_EQ(Read(encrypted_path), expected);
+    context.DecryptAsync(encrypted_path, restored_path).get();
+    EXPECT_EQ(Read(restored_path), input);
+}
+
+TEST(Context, FileDecryptionRejectsEmptyAndUnalignedCiphertext) {
+    TemporaryFiles temp;
+    const auto input_path = temp.directory / "input.bin";
+    const auto output_path = temp.directory / "output.bin";
+    crypto::SymmetricCipherContext context(MakeCipher(), Bytes({1, 2, 3, 4}),
+        crypto::CipherMode::ECB, crypto::PaddingMode::PKCS7);
+    for (const auto size : {0, 1, 65537}) {
+        const auto input = std::vector(size, std::byte{0x11});
+        Write(input_path, input);
+        EXPECT_THROW(context.DecryptAsync(input_path, output_path).get(), std::invalid_argument);
+        EXPECT_EQ(Read(input_path), input);
+    }
+}
+
+TEST(Context, FileOperationRejectsInputAsOutputWithoutTruncatingIt) {
+    TemporaryFiles temp;
+    const auto input_path = temp.directory / "input.bin";
+    const auto alias_path = temp.directory / "alias.bin";
+    const auto input = Bytes({1, 2, 3});
+    Write(input_path, input);
+    std::filesystem::create_hard_link(input_path, alias_path);
+    crypto::SymmetricCipherContext context(MakeCipher(), Bytes({1, 2, 3, 4}),
+        crypto::CipherMode::ECB, crypto::PaddingMode::PKCS7);
+    EXPECT_THROW(context.EncryptAsync(input_path, input_path).get(), std::invalid_argument);
+    EXPECT_THROW(context.DecryptAsync(input_path, input_path).get(), std::invalid_argument);
+    EXPECT_THROW(context.EncryptAsync(input_path, alias_path).get(), std::invalid_argument);
+    EXPECT_EQ(Read(input_path), input);
 }

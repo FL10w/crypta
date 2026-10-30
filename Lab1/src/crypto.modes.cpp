@@ -22,6 +22,17 @@ namespace crypto {
             }
         }
 
+        std::vector<std::byte> PrepareBlocks(
+            std::span<const std::byte> data,
+            std::size_t block_size,
+            PaddingMode padding_mode,
+            bool apply_padding
+        ) {
+            if (apply_padding) return AddPadding(data, block_size, padding_mode);
+            ValidateBlockAlignedData(data, block_size, "file chunk");
+            return {data.begin(), data.end()};
+        }
+
         void ValidateIVSize(std::span<const std::byte> iv, std::size_t expected_size, std::string_view mode_name) {
             if (iv.size() != expected_size) {
                 throw std::invalid_argument(std::format("invalid IV size for {} mode", mode_name));
@@ -178,12 +189,13 @@ namespace crypto {
             std::vector<std::byte> Encrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockSize(block_size);
 
-                const auto padded = AddPadding(data, block_size, padding_mode);
+                const auto padded = PrepareBlocks(data, block_size, padding_mode, apply_padding);
 
                 return ProcessBlocksParallel(
                     padded,
@@ -199,7 +211,8 @@ namespace crypto {
             std::vector<std::byte> Decrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockAlignedData(data, block_size, "ecb");
@@ -213,7 +226,7 @@ namespace crypto {
                     }
                 );
 
-                return RemovePadding(decrypted, block_size, padding_mode);
+                return apply_padding ? RemovePadding(decrypted, block_size, padding_mode) : decrypted;
             }
         };
 
@@ -227,13 +240,14 @@ namespace crypto {
             std::vector<std::byte> Encrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockSize(block_size);
                 ValidateIVSize(iv_, block_size, "cbc");
 
-                const auto padded = AddPadding(data, block_size, padding_mode);
+                const auto padded = PrepareBlocks(data, block_size, padding_mode, apply_padding);
 
                 std::vector<std::byte> result;
                 result.reserve(padded.size());
@@ -256,7 +270,8 @@ namespace crypto {
             std::vector<std::byte> Decrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockAlignedData(data, block_size, "cbc");
@@ -282,7 +297,14 @@ namespace crypto {
                     AppendBlock(result, block);
                 }
 
-                return RemovePadding(result, block_size, padding_mode);
+                return apply_padding ? RemovePadding(result, block_size, padding_mode) : result;
+            }
+
+            void AdvanceState(
+                std::span<const std::byte> plaintext,
+                std::span<const std::byte> ciphertext
+            ) override {
+                iv_.assign(ciphertext.end() - static_cast<std::ptrdiff_t>(iv_.size()), ciphertext.end());
             }
 
         private:
@@ -299,13 +321,14 @@ namespace crypto {
             std::vector<std::byte> Encrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockSize(block_size);
                 ValidateIVSize(iv_, block_size, "pcbc");
 
-                const auto padded = AddPadding(data, block_size, padding_mode);
+                const auto padded = PrepareBlocks(data, block_size, padding_mode, apply_padding);
 
                 std::vector<std::byte> result;
                 result.reserve(padded.size());
@@ -330,7 +353,8 @@ namespace crypto {
             std::vector<std::byte> Decrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockAlignedData(data, block_size, "pcbc");
@@ -359,7 +383,14 @@ namespace crypto {
                     prev_cipher_block.assign(cipher_block.begin(), cipher_block.end());
                 }
 
-                return RemovePadding(result, block_size, padding_mode);
+                return apply_padding ? RemovePadding(result, block_size, padding_mode) : result;
+            }
+
+            void AdvanceState(
+                std::span<const std::byte> plaintext,
+                std::span<const std::byte> ciphertext
+            ) override {
+                iv_ = XORBlocks(plaintext.last(iv_.size()), ciphertext.last(iv_.size()));
             }
 
         private:
@@ -376,13 +407,14 @@ namespace crypto {
             std::vector<std::byte> Encrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockSize(block_size);
                 ValidateIVSize(iv_, block_size, "cfb");
 
-                const auto padded = AddPadding(data, block_size, padding_mode);
+                const auto padded = PrepareBlocks(data, block_size, padding_mode, apply_padding);
 
                 std::vector<std::byte> result;
                 result.reserve(padded.size());
@@ -406,7 +438,8 @@ namespace crypto {
             std::vector<std::byte> Decrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockAlignedData(data, block_size, "cfb");
@@ -423,7 +456,14 @@ namespace crypto {
                     }
                 );
 
-                return RemovePadding(result, block_size, padding_mode);
+                return apply_padding ? RemovePadding(result, block_size, padding_mode) : result;
+            }
+
+            void AdvanceState(
+                std::span<const std::byte> plaintext,
+                std::span<const std::byte> ciphertext
+            ) override {
+                iv_.assign(ciphertext.end() - static_cast<std::ptrdiff_t>(iv_.size()), ciphertext.end());
             }
 
         private:
@@ -463,11 +503,12 @@ namespace crypto {
             std::vector<std::byte> Encrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockSize(block_size);
-                const auto padded = AddPadding(data, block_size, padding_mode);
+                const auto padded = PrepareBlocks(data, block_size, padding_mode, apply_padding);
                 return TransformBlocks(cipher, padded);
             }
 
@@ -475,10 +516,18 @@ namespace crypto {
             std::vector<std::byte> Decrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto decrypted = TransformBlocks(cipher, data);
-                return RemovePadding(decrypted, cipher.BlockSize(), padding_mode);
+                return apply_padding ? RemovePadding(decrypted, cipher.BlockSize(), padding_mode) : decrypted;
+            }
+
+            void AdvanceState(
+                std::span<const std::byte> plaintext,
+                std::span<const std::byte> ciphertext
+            ) override {
+                iv_ = XORBlocks(plaintext.last(iv_.size()), ciphertext.last(iv_.size()));
             }
 
         private:
@@ -519,11 +568,12 @@ namespace crypto {
             std::vector<std::byte> Encrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockSize(block_size);
-                const auto padded = AddPadding(data, block_size, padding_mode);
+                const auto padded = PrepareBlocks(data, block_size, padding_mode, apply_padding);
                 return TransformBlocks(cipher, padded);
             }
 
@@ -531,10 +581,18 @@ namespace crypto {
             std::vector<std::byte> Decrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto decrypted = TransformBlocks(cipher, data);
-                return RemovePadding(decrypted, cipher.BlockSize(), padding_mode);
+                return apply_padding ? RemovePadding(decrypted, cipher.BlockSize(), padding_mode) : decrypted;
+            }
+
+            void AdvanceState(
+                std::span<const std::byte> plaintext,
+                std::span<const std::byte> ciphertext
+            ) override {
+                iv_ = MakeCounterBlock(iv_, plaintext.size() / iv_.size());
             }
 
         private:
@@ -588,11 +646,12 @@ namespace crypto {
             std::vector<std::byte> Encrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto block_size = cipher.BlockSize();
                 ValidateBlockSize(block_size);
-                const auto padded = AddPadding(data, block_size, padding_mode);
+                const auto padded = PrepareBlocks(data, block_size, padding_mode, apply_padding);
                 return TransformBlocks(cipher, padded);
             }
 
@@ -600,10 +659,21 @@ namespace crypto {
             std::vector<std::byte> Decrypt(
                 const SymmetricCipher& cipher,
                 std::span<const std::byte> data,
-                PaddingMode padding_mode
+                PaddingMode padding_mode,
+                bool apply_padding
             ) const override {
                 const auto decrypted = TransformBlocks(cipher, data);
-                return RemovePadding(decrypted, cipher.BlockSize(), padding_mode);
+                return apply_padding ? RemovePadding(decrypted, cipher.BlockSize(), padding_mode) : decrypted;
+            }
+
+            void AdvanceState(
+                std::span<const std::byte> plaintext,
+                std::span<const std::byte> ciphertext
+            ) override {
+                if (delta_.empty()) {
+                    delta_.assign(iv_.begin() + static_cast<std::ptrdiff_t>(iv_.size() / 2), iv_.end());
+                }
+                iv_ = MakeRandomDeltaState(iv_, delta_, plaintext.size() / iv_.size());
             }
 
         private:
@@ -613,6 +683,10 @@ namespace crypto {
     }
 
     CipherModeStrategy::~CipherModeStrategy() = default;
+
+    void CipherModeStrategy::AdvanceState(
+        std::span<const std::byte>, std::span<const std::byte>
+    ) {} // ECB has no feedback state.
 
     namespace {
         void ValidateNoIV(std::span<const std::byte> iv, std::string_view mode_name) {

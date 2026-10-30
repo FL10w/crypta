@@ -1,0 +1,357 @@
+ТЕСТЫ ЛАБОРАТОРНОЙ № 1
+
+Здесь перечислены все тесты из каталога tests: каждый файл — отдельная
+группа, внутри группы тесты идут в том же порядке, что и в исходном файле.
+Сначала указано точное имя теста, затем простыми словами — что он проверяет.
+RoundTrip означает: зашифровать данные, расшифровать и сравнить с исходными.
+EXPECT_THROW проверяет, что неверные данные вызывают ожидаемое исключение.
+
+Всего: 116 тестов в 8 файлах. Один тест может перебирать много вариантов.
+Запуск всех тестов из Lab1: ctest --test-dir build --output-on-failure
+Запуск одного теста: ./build/tests1 --gtest_filter=DES.ZEROS
+
+======================================================================
+Файл: tests/bits_tests.cpp
+Перестановка битов функцией PermuteBits. Всего 10 тестов.
+======================================================================
+
+1. PermuteBits.KeepsMsbOrderedBitsWithZeroBasedIndexing
+   Порядок от старшего бита к младшему, индексы с 0: тождественная
+   перестановка сохраняет первые четыре бита.
+2. PermuteBits.KeepsLsbOrderedBitsWithZeroBasedIndexing
+   То же для порядка от младшего бита к старшему и индексов с 0.
+3. PermuteBits.SupportsOneBasedIndexing
+   Поддерживается нумерация битов с 1.
+4. PermuteBits.ReversesFourMsbOrderedBits
+   Перестановка {3, 2, 1, 0} разворачивает четыре бита: 1010 -> 0101.
+5. PermuteBits.CanProduceMoreThanOneByte
+   Перестановка может брать биты из нескольких байтов и выдавать
+   результат длиннее одного байта, включая неполный последний байт.
+6. PermuteBits.EmptyPBlockProducesEmptyResult
+   Пустая таблица перестановки даёт пустой результат.
+7. PermuteBits.AcceptsStdArrayInputs
+   На вход можно передать std::array, а не только std::vector.
+8. PermuteBits.ThrowsWhenInputIsEmptyAndPBlockIsNotEmpty
+   Нельзя брать биты из пустых входных данных.
+9. PermuteBits.ThrowsWhenZeroAppearsInOneBasedPBlock
+   При нумерации с 1 индекс 0 отклоняется.
+10. PermuteBits.ThrowsWhenPBlockIndexIsOutsideInput
+    Индекс за пределами входных данных отклоняется.
+
+======================================================================
+Файл: tests/context_tests.cpp
+Асинхронный контекст, файлы и чтение порциями. Всего 8 тестов.
+Здесь используется простой тестовый XOR-шифр с блоком 4 байта, чтобы
+проверять контекст и передачу состояния независимо от DES и DEAL.
+======================================================================
+
+1. Context.EncryptAsyncAndDecryptAsyncRoundTrip
+   Асинхронное шифрование и дешифрование массива в ECB с PKCS7
+   восстанавливает исходные данные.
+2. Context.EncryptFileAsyncAndDecryptFileAsyncRoundTrip
+   Файловые методы EncryptFileAsync/DecryptFileAsync восстанавливают
+   небольшой файл побайтно.
+3. Context.EncryptAsyncAndDecryptAsyncLargeInputRoundTrip
+   Массив длиной 64 КиБ + 3 байта восстанавливается в CTR с PKCS7.
+4. Context.FileChunksMatchArrayOperationsForEveryModeAndPadding
+   Все 7 режимов и 4 паддинга проверяются на файлах длиной 65535,
+   65536, 65537 и 131077 байт: до границы порции, ровно на границе,
+   после границы и на нескольких порциях. Внутренние нули сохраняются.
+   Файловый шифротекст совпадает с шифротекстом массива для Zeros,
+   ANSI X.923 и PKCS7. Для ISO10126 сравниваются длина и восстановленные
+   данные, поскольку случайные байты паддинга могут отличаться.
+   Проверяется совместимость файловых и массивных методов в обе стороны,
+   сохранность исходного файла и отсутствие паддинга между порциями.
+5. Context.ZerosFilesKeepOneByteAndRemoveSuffixAcrossChunks
+   Во всех 7 режимах проверяются файлы длиной 1, 4, 65536, 65537
+   и 196613 байт. Файл из одних нулей восстанавливается в один нулевой
+   байт. Если первый байт ненулевой, а остальные нулевые, остаётся
+   первый байт. Нулевой хвост удаляется даже через несколько порций,
+   а исходный файл сохраняется. Проверяются и методы с суффиксом FileAsync.
+6. Context.RandomDeltaFileChunksPreserveExplicitDelta
+   RandomDelta с явно переданным delta сохраняет последовательность
+   счётчика на нескольких порциях. Шифротексты файла и массива совпадают,
+   а дешифрование восстанавливает все 131077 байт.
+7. Context.FileDecryptionRejectsEmptyAndUnalignedCiphertext
+   Файлы с шифротекстом длиной 0, 1 и 65537 байт отклоняются:
+   шифротекст должен быть непустым и кратным размеру блока.
+   Исходные файлы сохраняются.
+8. Context.FileOperationRejectsInputAsOutputWithoutTruncatingIt
+   Нельзя записывать результат в сам входной файл, в том числе через
+   жёсткую ссылку на него. Проверяется, что исходные байты не затёрты.
+
+======================================================================
+Файл: tests/deal_tests.cpp
+Базовая работа DEAL и его использование в контексте. Всего 20 тестов.
+======================================================================
+
+1. DEAL.HasSixteenByteBlockSize
+   Размер блока DEAL равен 16 байтам.
+2. DEAL.ImplementsSymmetricCipherInterface
+   DEAL работает через общий интерфейс SymmetricCipher.
+3. DEALKeyExpansion.AcceptsSixteenByteKey
+   Принимается ключ длиной 16 байт.
+4. DEALKeyExpansion.RejectsShortKey
+   Ключ длиной 8 байт отклоняется.
+5. DEALKeyExpansion.RejectsLongKey
+   Ключ длиной 17 байт отклоняется. Допустимые размеры ключа DEAL —
+   16, 24 и 32 байта; тест не запрещает поддерживаемые длинные ключи.
+6. DEALKeyExpansion.GeneratedRoundKeysAllowEncryption
+   После SetKey можно зашифровать блок без исключения.
+7. DEALKeyExpansion.GeneratedRoundKeysAllowRoundTrip
+   После настройки ключа шифрование меняет блок, а дешифрование
+   восстанавливает исходные байты.
+8. DEALKeyExpansion.SameKeyProducesStableCiphertext
+   Два экземпляра DEAL с одинаковым ключом дают одинаковый шифротекст.
+9. DEAL.RejectsShortBlockOnEncrypt
+   Слишком короткий блок для шифрования отклоняется.
+10. DEAL.RejectsLongBlockOnEncrypt
+    Слишком длинный блок для шифрования отклоняется.
+11. DEAL.RejectsShortBlockOnDecrypt
+    Слишком короткий блок для дешифрования отклоняется.
+12. DEAL.RejectsLongBlockOnDecrypt
+    Слишком длинный блок для дешифрования отклоняется.
+13. DEAL.RejectsEncryptBeforeSetKey
+    Шифрование до установки ключа отклоняется.
+14. DEAL.RejectsDecryptBeforeSetKey
+    Дешифрование до установки ключа отклоняется.
+15. DEAL.RoundTripSingleBlock
+    Один блок проходит шифрование и дешифрование без потери данных.
+16. DEAL.DifferentKeysProduceDifferentCiphertexts
+    Для одного входного блока два выбранных разных ключа дают
+    разные шифротексты.
+17. DEAL.EcbContextRoundTrip
+    DEAL через асинхронный контекст ECB с PKCS7 восстанавливает массив.
+18. DEAL.CbcContextRoundTrip
+    То же в CBC с IV и PKCS7.
+19. DEAL.CtrContextLargeInputRoundTrip
+    Большой массив восстанавливается в CTR с PKCS7.
+20. DEAL.RandomDeltaContextRoundTrip
+    Массив восстанавливается в RandomDelta с PKCS7.
+
+======================================================================
+Файл: tests/des_tests.cpp
+DES, известные ответы, ошибки входа и контекст. Всего 17 тестов.
+======================================================================
+
+1. DES.HasEightByteBlockSize
+   Размер блока DES равен 8 байтам.
+2. DES.ImplementsSymmetricCipherInterface
+   DES работает через общий интерфейс SymmetricCipher.
+3. DES.EncryptsKnownNistVector
+   Проверяется известный ответ: ключ 133457799BBCDFF1,
+   блок 0123456789ABCDEF -> шифротекст 85E813540F0AB405.
+4. DES.DecryptsKnownNistVector
+   Проверяется обратное преобразование того же известного ответа.
+5. DES.EncryptsAllZeroVector
+   Нулевой ключ и нулевой блок дают ожидаемый шифротекст
+   8CA64DE9C1B123A7.
+6. DES.DecryptsAllZeroVector
+   При нулевом ключе указанный шифротекст превращается в нулевой блок.
+7. DES.RoundTripSingleBlock
+   Шифрование и дешифрование одного блока восстанавливают вход.
+8. DES.DifferentKeysProduceDifferentCiphertexts
+   Для одного блока два выбранных разных ключа дают разные шифротексты.
+9. DES.RejectsShortKey
+   Ключ короче 8 байт отклоняется.
+10. DES.RejectsLongKey
+    Ключ длиннее 8 байт отклоняется.
+11. DES.RejectsShortBlockOnEncrypt
+    Слишком короткий блок для шифрования отклоняется.
+12. DES.RejectsLongBlockOnEncrypt
+    Слишком длинный блок для шифрования отклоняется.
+13. DES.RejectsShortBlockOnDecrypt
+    Слишком короткий блок для дешифрования отклоняется.
+14. DES.RejectsEncryptBeforeSetKey
+    Шифрование до установки ключа отклоняется.
+15. DES.CbcContextRoundTrip
+    DES через контекст CBC с IV и PKCS7 восстанавливает массив.
+16. DES.CtrContextLargeInputRoundTrip
+    Большой массив восстанавливается в CTR с PKCS7.
+17. DES.ZEROS
+    Один нулевой байт шифруется и дешифруется в PCBC с Zeros
+    и восьмибайтовым IV. После удаления паддинга результат не пуст.
+
+======================================================================
+Файл: tests/feistel_tests.cpp
+Сеть Фейстеля с тестовыми расширением ключа и функцией раунда.
+Всего 10 тестов.
+======================================================================
+
+1. FeistelNetwork.ImplementsSymmetricCipherInterface
+   Сеть Фейстеля работает через общий интерфейс SymmetricCipher.
+2. FeistelNetwork.DecryptsEncryptedBlock
+   Шифрование меняет блок, а дешифрование восстанавливает его.
+3. FeistelNetwork.RejectsOddBlockSize
+   Нечётный размер блока отклоняется: нужны две равные половины.
+4. FeistelNetwork.RejectsZeroBlockSize
+   Нулевой размер блока отклоняется.
+5. FeistelNetwork.RejectsNullKeyExpansion
+   Нельзя создать сеть без объекта расширения ключа.
+6. FeistelNetwork.RejectsNullRoundTransformation
+   Нельзя создать сеть без объекта функции раунда.
+7. FeistelNetwork.RejectsEncryptionBeforeSetKey
+   Шифрование до установки ключа отклоняется.
+8. FeistelNetwork.RejectsInvalidInputBlockSize
+   Входной блок неверной длины отклоняется.
+9. FeistelNetwork.RejectsEmptyRoundKeys
+   Расширение ключа не может вернуть пустой список раундовых ключей.
+10. FeistelNetwork.RejectsInvalidRoundTransformationSize
+    Отклоняется функция раунда, возвращающая результат неверной длины.
+
+======================================================================
+Файл: tests/modes_tests.cpp
+Режимы шифрования независимо от DES и DEAL. Всего 26 тестов.
+В большинстве тестов используется простой XOR-шифр.
+======================================================================
+
+1. Modes.EcbDecryptsEncryptedData
+   Шифрование и дешифрование ECB с PKCS7 восстанавливают вход.
+2. Modes.CbcDecryptsEncryptedData
+   То же для CBC.
+3. Modes.PcbcDecryptsEncryptedData
+   То же для PCBC.
+4. Modes.CfbDecryptsEncryptedData
+   То же для CFB.
+5. Modes.OfbDecryptsEncryptedData
+   То же для OFB.
+6. Modes.CtrDecryptsEncryptedData
+   То же для CTR.
+7. Modes.RandomDeltaDecryptsEncryptedData
+   То же для RandomDelta.
+8. Modes.CfbDecryptUsesEncryptBlock
+   При дешифровании CFB применяется EncryptBlock базового шифра,
+   а не DecryptBlock.
+9. Modes.OfbDecryptUsesEncryptBlock
+   То же для OFB.
+10. Modes.CtrDecryptUsesEncryptBlock
+    То же для CTR.
+11. Modes.RandomDeltaDecryptUsesEncryptBlock
+    То же для RandomDelta.
+12. Modes.EcbRejectsIv
+    Для ECB нельзя передавать IV.
+13. Modes.RejectsExtraParameters
+    CBC отклоняет неподдерживаемые дополнительные параметры.
+14. Modes.CbcRejectsInvalidIvSize
+    CBC отклоняет IV, длина которого не равна размеру блока.
+15. Modes.DecryptRejectsUnalignedData
+    CTR отклоняет шифротекст, длина которого не кратна размеру блока.
+16. Modes.RandomDeltaRejectsOddBlockSize
+    RandomDelta отклоняет нечётный размер блока.
+17. Modes.CbcDoesNotProduceEqualBlocksForEqualPlainBlocks
+    Для выбранных двух одинаковых открытых блоков CBC выдаёт разные
+    зашифрованные блоки за счёт цепочки обратной связи.
+18. Modes.EcbLargeInputRoundTripPreservesBlockOrder
+    Большой массив в ECB восстанавливается с исходным порядком байтов.
+19. Modes.CbcLargeInputRoundTripPreservesBlockOrder
+    То же для CBC.
+20. Modes.CtrLargeInputRoundTripPreservesBlockOrder
+    То же для CTR.
+21. Modes.RandomDeltaLargeInputRoundTripPreservesBlockOrder
+    То же для RandomDelta.
+22. Modes.CfbParallelDecryptionMatchesIndependentBlockFormula
+    Дешифрование фиксированного шифротекста CFB сравнивается с отдельно
+    вычисленной формулой. При наличии нескольких аппаратных потоков
+    проверяется, что действительно задействован больше чем один поток.
+23. Modes.CfbParallelWorkerExceptionReachesCaller
+    Исключение внутри рабочего потока CFB передаётся вызывающему коду.
+24. Modes.RandomDeltaAcceptsExplicitDeltaAndChangesCounterSequence
+    Явно заданный delta принимается, обеспечивает восстановление входа
+    и меняет шифротекст по сравнению с delta из IV.
+25. Modes.RandomDeltaRejectsZeroDelta
+    Нулевой delta отклоняется.
+26. Modes.PcbcLargeInputRoundTripPreservesBlockOrder
+    Большой массив в PCBC восстанавливается с исходным порядком байтов.
+
+======================================================================
+Файл: tests/padding_tests.cpp
+Добавление и удаление четырёх видов паддинга. Всего 19 тестов.
+======================================================================
+
+1. Padding.AddsZerosPaddingToBlockBoundary
+   Zeros дополняет неполный блок нулями до его границы.
+2. Padding.DoesNotAddZerosPaddingWhenAlreadyAligned
+   Zeros не добавляет лишний блок к уже выровненным данным.
+3. Padding.RemovesZerosPaddingFromEnd
+   Zeros удаляет нули с конца, сохраняя предшествующие ненулевые байты.
+4. Padding.KeepsOneByteWhenZerosPaddedDataContainsOnlyZeros
+   Из 4, 8 и 16 нулевых байтов после удаления Zeros остаётся один
+   нулевой байт: результат не становится пустым.
+5. Padding.ThrowsOnZeroBlockSizeForZerosPadding
+   Zeros отклоняет нулевой размер блока.
+6. Padding.ThrowsWhenZerosPaddedDataSizeIsNotBlockAligned
+   При удалении Zeros отклоняются данные, не кратные размеру блока.
+7. Padding.AddsPkcs7Padding
+   PKCS7 заполняет хвост байтами, каждый из которых равен длине набивки.
+8. Padding.AddsFullPkcs7BlockWhenAlreadyAligned
+   PKCS7 добавляет полный блок набивки к уже выровненным данным.
+9. Padding.RemovesPkcs7Padding
+   Корректная набивка PKCS7 удаляется.
+10. Padding.ThrowsOnInvalidPkcs7PaddingBytes
+    PKCS7 отклоняет хвост, где не все байты равны длине набивки.
+11. Padding.AddsAnsiX923Padding
+    ANSI X.923 добавляет нули и последний байт с длиной набивки.
+12. Padding.AddsFullAnsiX923BlockWhenAlreadyAligned
+    ANSI X.923 добавляет полный блок набивки к выровненным данным.
+13. Padding.RemovesAnsiX923Padding
+    Корректная набивка ANSI X.923 удаляется.
+14. Padding.ThrowsOnInvalidAnsiX923PaddingBytes
+    ANSI X.923 отклоняет ненулевые байты перед байтом длины набивки.
+15. Padding.AddsIso10126PaddingWithCorrectSizeByte
+    ISO10126 сохраняет входной префикс, даёт нужный размер блока
+    и записывает длину набивки в последний байт.
+16. Padding.AddsFullIso10126BlockWhenAlreadyAligned
+    ISO10126 добавляет полный блок к выровненным данным,
+    сохраняет входной префикс и правильно записывает длину набивки.
+17. Padding.RemovesIso10126Padding
+    ISO10126 удаляет хвост по последнему байту независимо
+    от значений остальных байтов набивки.
+18. Padding.ThrowsOnZeroBlockSize
+    PKCS7 отклоняет нулевой размер блока.
+19. Padding.ThrowsWhenPaddedDataSizeIsNotBlockAligned
+    При удалении PKCS7 отклоняются данные, не кратные размеру блока.
+
+======================================================================
+Файл: tests/regression_tests.cpp
+Общие проверки разных алгоритмов и ранее исправленных случаев.
+Всего 6 тестов.
+======================================================================
+
+1. Regression.EveryContextModeAndPaddingPreservesSupportedBoundaryInputs
+   DES, DEAL-128, DEAL-192 и DEAL-256 перебираются со всеми 7 режимами,
+   4 паддингами и длинами 0, 1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 65.
+   Для Zeros пустой ввод пропускается; непустой ввод заканчивается 0x01.
+   Отдельный контекст с теми же ключом и IV восстанавливает исходный
+   массив. Всего 1316 сочетаний.
+2. Regression.FileOverloadsPreserveSupportedInputsWithoutChangingInput
+   Те же 4 варианта алгоритма, 7 режимов и 4 паддинга проверяются
+   на пустом файле и файле длиной 32 байта с последним байтом 0x01.
+   Пустой файл с Zeros пропускается. Восстановленный файл совпадает
+   с исходным, исходный файл не изменяется. Всего 196 файловых циклов.
+3. Regression.AsyncOperationSurvivesContextDestruction
+   Запущенная асинхронная операция завершается после уничтожения
+   объекта контекста, а результат корректно расшифровывается.
+4. Regression.ZerosContextUsesRawCiphertextWithoutMetadata
+   В ECB с Zeros для выровненного входа контекст выдаёт ровно один
+   обычный блок DES. Длина, метки и другие служебные байты не добавляются.
+5. Regression.ZerosNeverProducesEmptyResultForAllCipherVariantsAndModes
+   Для DES и трёх размеров ключа DEAL во всех 7 режимах проверяются
+   массивы из одних нулей длиной 1, 7, 8, 9, 15, 16, 17 и 32 байта.
+   После удаления Zeros остаётся ровно один нулевой байт.
+   Для длин 1 и 32 проверяются также файлы и сохранность оригинала.
+   Всего 224 проверки массивов и 56 файловых циклов.
+6. Regression.DealMatchesIndependentCiphertextsForAllKeySizes
+   DEAL-128, DEAL-192 и DEAL-256 проверяются на нулевых и ненулевых
+   наборах данных по шести заранее вычисленным независимым ответам.
+   Проверяются и шифрование, и дешифрование; источник ответов
+   описан в tests/DEAL_VECTORS.md.
+
+Примечания:
+- tests/CMakeLists.txt собирает перечисленные тесты; собственных тестов
+  в нём нет. tests/DEAL_VECTORS.md объясняет происхождение ответов DEAL.
+- assets/allocator_red_black_tree_tests.cpp — образец исходного кода,
+  который демонстрация шифрует как обычный файл. Его тесты аллокатора
+  не относятся к проверкам криптографии и в tests1 не собираются.
+- Обычный Zeros не хранит исходную длину: настоящие конечные нули
+  тоже удаляются. Для непустых данных из одних нулей сохраняется один
+  нулевой байт. Точное число исходных нулей не восстанавливается.

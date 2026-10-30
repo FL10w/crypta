@@ -23,15 +23,24 @@ export namespace crypto {
         virtual std::vector<std::byte> Encrypt(
             const SymmetricCipher& cipher,
             std::span<const std::byte> data,
-            PaddingMode padding_mode
+            PaddingMode padding_mode,
+            bool apply_padding = true
         ) const = 0;
 
         [[nodiscard]]
         virtual std::vector<std::byte> Decrypt(
             const SymmetricCipher& cipher,
             std::span<const std::byte> data,
-            PaddingMode padding_mode
+            PaddingMode padding_mode,
+            bool apply_padding = true
         ) const = 0;
+
+        // Continue with the next aligned portion of the same message.
+        // The spans must contain the unpadded plaintext and its ciphertext.
+        virtual void AdvanceState(
+            std::span<const std::byte> plaintext,
+            std::span<const std::byte> ciphertext
+        );
     };
 
     [[nodiscard]]

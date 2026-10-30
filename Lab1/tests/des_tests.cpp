@@ -120,6 +120,7 @@ TEST(DES, DecryptsAllZeroVector) {
     EXPECT_EQ(des.DecryptBlock(ciphertext), expected);
 }
 
+
 TEST(DES, RoundTripSingleBlock) {
     crypto::DES des;
     des.SetKey(NistKey());
@@ -262,4 +263,27 @@ TEST(DES, CtrContextLargeInputRoundTrip) {
     context.DecryptAsync(encrypted, decrypted).get();
 
     EXPECT_EQ(decrypted, input);
+}
+
+
+TEST(DES, ZEROS) {
+        const auto key = NistKey();
+
+    std::vector<std::byte> data = {static_cast<std::byte>(0x00)};
+
+    crypto::SymmetricCipherContext context(
+        std::make_unique<crypto::DES>(),
+        key,
+        crypto::CipherMode::PCBC,
+        crypto::PaddingMode::Zeros,
+        std::vector(8, std::byte{0})
+    );
+
+    std::vector<std::byte> encrypted;
+    context.EncryptAsync(data, encrypted).get();
+
+    std::vector<std::byte> decrypted;
+    context.DecryptAsync(encrypted, decrypted).get();
+
+    EXPECT_EQ(decrypted.empty(), false);
 }

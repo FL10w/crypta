@@ -142,6 +142,38 @@ TEST(Regression, ZerosContextUsesRawCiphertextWithoutMetadata) {
     EXPECT_EQ(output, input);
 }
 
+TEST(Regression, ZerosNeverProducesEmptyResultForAllCipherVariantsAndModes) {
+    TemporaryFiles temp;
+    const auto input_path = temp.directory / "zeros.bin";
+    const auto encrypted_path = temp.directory / "encrypted.bin";
+    const auto restored_path = temp.directory / "restored.bin";
+    for (const auto variant : variants) {
+        const auto key = std::vector(variant.key_size, std::byte{0x13});
+        const auto iv = std::vector(variant.des ? 8 : 16, std::byte{0x17});
+        for (int mode = 0; mode < 7; ++mode) {
+            crypto::SymmetricCipherContext context(Cipher(variant.des), key,
+                static_cast<crypto::CipherMode>(mode), crypto::PaddingMode::Zeros,
+                mode == 0 ? std::span<const std::byte>{} : iv);
+            for (const auto size : {1, 7, 8, 9, 15, 16, 17, 32}) {
+                SCOPED_TRACE(::testing::Message() << "key=" << variant.key_size << " mode=" << mode << " size=" << size);
+                const auto input = std::vector(size, std::byte{0});
+                std::vector<std::byte> encrypted, restored;
+                context.EncryptAsync(input, encrypted).get();
+                context.DecryptAsync(encrypted, restored).get();
+                EXPECT_EQ(restored, std::vector{std::byte{0}});
+                if (size == 1 || size == 32) {
+                    { std::ofstream file(input_path, std::ios::binary);
+                      file.write(reinterpret_cast<const char*>(input.data()), input.size()); }
+                    context.EncryptAsync(input_path, encrypted_path).get();
+                    context.DecryptAsync(encrypted_path, restored_path).get();
+                    EXPECT_EQ(Read(restored_path), std::vector{std::byte{0}});
+                    EXPECT_EQ(Read(input_path), input);
+                }
+            }
+        }
+    }
+}
+
 // Fixed answers generated independently using Brian Gladman's 1999 DEAL
 // implementation (full DES path) outside this project. See DEAL_VECTORS.md.
 TEST(Regression, DealMatchesIndependentCiphertextsForAllKeySizes) {

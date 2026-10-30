@@ -114,12 +114,9 @@ namespace crypto {
             ValidatePaddedData(data, block_size, "zeros", false);
 
             std::vector unpadded(data.begin(), data.end());
-            while (!unpadded.empty() && unpadded.back() == std::byte{0}) {
+            // Keep one byte when the entire message consists of zeros.
+            while (unpadded.size() > 1 && unpadded.back() == std::byte{0}) {
                 unpadded.pop_back();
-            }
-
-            if (unpadded.empty()) {
-                unpadded.push_back(std::byte{0});
             }
 
             return unpadded;
