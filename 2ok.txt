@@ -1,0 +1,29 @@
+КАК ЗАПУСТИТЬ
+В терминале выполнить:
+
+cd /home/flow/Documents/vsc/crypta/lab2
+./run_tests.sh
+
+Для повторного показа без пересборки:
+
+cd /home/flow/Documents/vsc/crypta/lab2
+./build/test_laba2
+
+Для сохранения вывода и просмотра по частям:
+
+./build/test_laba2 > build/test_run.log
+less build/test_run.log
+
+Выход из less — q. Номера проверок из каталога можно получить из лога так:
+
+grep -E '^\[(PASS|FAIL)\]' build/test_run.log | nl -ba
+
+
+
+
+
+
+
+
+
+

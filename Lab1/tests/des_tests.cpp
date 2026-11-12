@@ -276,7 +276,7 @@ TEST(DES, ZEROS) {
         key,
         crypto::CipherMode::PCBC,
         crypto::PaddingMode::Zeros,
-        std::vector(8, std::byte{0})
+        std::vector(1, std::byte{0})
     );
 
     std::vector<std::byte> encrypted;
